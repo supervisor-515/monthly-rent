@@ -41,7 +41,7 @@
       expenses: { 상수도: 0, 정화조: 0, 공동전기: 0, 기타: 0 },
       optionCatalog: [...DEFAULT_OPTIONS],
       ledger: {},                    // "YYYY-MM": { income, expense }
-      settings: { theme: "light" },
+      settings: { theme: "light", notify: false },
       updatedAt: Date.now(),
     };
   }
@@ -75,6 +75,7 @@
     } catch (e) {
       toast("저장 공간이 부족합니다.");
     }
+    pushAlertSnapshot();   // 서비스워커 백그라운드 점검용 미러링
   }
 
   /* ---------- 유틸 ---------- */
@@ -617,11 +618,13 @@
   /* ---------- 설정 / 백업 ---------- */
   function openMenu() {
     const dark = state.settings.theme === "dark";
+    const notifyOn = !!state.settings.notify && (!("Notification" in window) || Notification.permission === "granted");
     openModal(`
       <div class="modal-head"><div><h2>설정 · 데이터 관리</h2></div><button class="modal-close" data-close>×</button></div>
       <div class="modal-body">
         <div class="menu-list">
           <button class="menu-item" data-act="theme"><span class="ico">${dark ? "☀️" : "🌙"}</span><span>${dark ? "라이트 모드로 전환" : "다크 모드로 전환"}</span></button>
+          <button class="menu-item" data-act="notify"><span class="ico">🔔</span><span>만기 폰 알림 ${notifyOn ? "끄기" : "켜기"}</span></button>
           <button class="menu-item" data-act="units"><span class="ico">🏗️</span><span>호실 추가 · 삭제</span></button>
           <button class="menu-item" data-act="export"><span class="ico">💾</span><span>데이터 백업 (JSON 내보내기)</span></button>
           <button class="menu-item" data-act="import"><span class="ico">📂</span><span>데이터 복원 (JSON 가져오기)</span></button>
@@ -637,6 +640,7 @@
         act("theme").addEventListener("click", () => {
           state.settings.theme = dark ? "light" : "dark"; save(); applyTheme(); close(); openMenu();
         });
+        act("notify").addEventListener("click", async () => { close(); await toggleNotifications(); });
         act("units").addEventListener("click", () => { close(); openUnitManager(); });
         act("export").addEventListener("click", exportData);
         act("import").addEventListener("click", () => overlay.querySelector("#importFile").click());
@@ -768,6 +772,63 @@
     }
   }
 
+  /* ---------- 만기 알림 (실제 폰 알림) ---------- */
+  const notifySupported = () => "Notification" in window && "serviceWorker" in navigator;
+
+  /** 현재 호실 데이터를 IndexedDB 로 미러링 (SW 백그라운드 점검용) */
+  function pushAlertSnapshot() {
+    if (!window.SubelStore || !window.SubelStore.idbSet) return;
+    const units = state.units
+      .filter(isOccupied)
+      .map(u => ({ no: u.no, tenant: u.tenant, expiryDate: u.expiryDate }));
+    window.SubelStore.idbSet("units", units).catch(() => {});
+  }
+
+  /** 백그라운드 주기 점검 등록 (Chrome/Android · best-effort) */
+  async function registerPeriodicSync() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (!("periodicSync" in reg)) return false;
+      const status = await navigator.permissions.query({ name: "periodic-background-sync" });
+      if (status.state !== "granted") return false;
+      await reg.periodicSync.register("rent-expiry-check", { minInterval: 24 * 60 * 60 * 1000 });
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /** 앱이 열려있을 때 즉시 점검 → 임박 호실 있으면 시스템 알림 */
+  async function foregroundExpiryCheck() {
+    if (!state.settings.notify || !notifySupported() || Notification.permission !== "granted") return;
+    try {
+      pushAlertSnapshot();
+      const reg = await navigator.serviceWorker.ready;
+      // SW 가 IndexedDB 를 읽어 하루 1회 알림을 처리한다.
+      if (reg.active) reg.active.postMessage({ type: "check-expiry" });
+    } catch (e) {}
+  }
+
+  /** 설정에서 알림 켜기/끄기 */
+  async function toggleNotifications() {
+    if (!notifySupported()) { toast("이 브라우저는 알림을 지원하지 않습니다"); return; }
+    if (state.settings.notify) {
+      state.settings.notify = false; save();
+      toast("만기 폰 알림을 껐습니다");
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      toast("알림 권한이 거부되어 있습니다. 브라우저 사이트 설정에서 허용해 주세요");
+      return;
+    }
+    state.settings.notify = true; save();
+    const bg = await registerPeriodicSync();
+    await foregroundExpiryCheck();
+    toast(bg
+      ? "만기 폰 알림을 켰습니다 (백그라운드 점검 포함)"
+      : "만기 폰 알림을 켰습니다 (앱 실행 시 점검)");
+  }
+
   /* ---------- 이벤트 바인딩 ---------- */
   function init() {
     applyTheme();
@@ -789,7 +850,9 @@
     // 서비스워커 등록 (오프라인/PWA)
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js").catch(() => {});
+        navigator.serviceWorker.register("sw.js")
+          .then(() => { pushAlertSnapshot(); foregroundExpiryCheck(); })
+          .catch(() => {});
       });
     }
   }
