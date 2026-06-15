@@ -29,6 +29,9 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        with:
+          # Pages 사이트가 없으면 자동 생성 (Settings 수동 설정 불필요)
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
