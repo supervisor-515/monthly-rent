@@ -514,9 +514,12 @@
   function ledgerFor(key) {
     const t = totals();
     const rec = state.ledger[key];
+    // 현재 수입/지출 자동 적용은 '해당 월'(현재 달)에만 적용한다.
+    // 과거/미래 달은 저장된 실적이 없으면 0으로 둔다.
+    const isCurrent = key === monthKey(new Date());
     return {
-      income: rec && rec.income != null ? rec.income : t.income,
-      expense: rec && rec.expense != null ? rec.expense : t.expense,
+      income: rec && rec.income != null ? rec.income : (isCurrent ? t.income : 0),
+      expense: rec && rec.expense != null ? rec.expense : (isCurrent ? t.expense : 0),
     };
   }
 
@@ -532,7 +535,7 @@
           <span><i style="background:var(--net)"></i>순수입</span>
         </div>
         <canvas id="trendChart" width="600" height="300"></canvas>
-        <p class="hint" style="margin-top:10px">값을 직접 입력하면 해당 월 실적으로 저장됩니다. 비워두면 현재 수입/지출이 자동 적용됩니다.</p>
+        <p class="hint" style="margin-top:10px">값을 직접 입력하면 해당 월 실적으로 저장됩니다. 현재 달은 비워두면 현재 수입/지출이 자동 적용되며, 다른 달은 입력한 달에만 반영됩니다.</p>
         <table class="ledger-table">
           <thead><tr><th>월</th><th>수입</th><th>지출</th><th>순수입</th></tr></thead>
           <tbody>
