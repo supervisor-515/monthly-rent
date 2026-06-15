@@ -3,7 +3,6 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches:
-      - claude/sweet-meitner-8gtlz4
       - main
   workflow_dispatch:
 
