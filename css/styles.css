@@ -491,3 +491,36 @@ canvas#trendChart { width: 100%; height: auto; }
   .modal-body { overflow-x: auto; }
   canvas#trendChart { min-width: 480px; }
 }
+
+/* ============================================================
+   호실 추가 · 삭제 관리
+   ============================================================ */
+.unit-manage-list { display: flex; flex-direction: column; gap: 8px; }
+.unit-manage-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.unit-manage-no { font-weight: 700; min-width: 56px; }
+.unit-manage-row .muted { flex: 1; font-size: 13px; }
+
+/* ============================================================
+   인쇄 / PDF 저장 — 표 중심의 깔끔한 출력
+   ============================================================ */
+@media print {
+  :root { --shadow: none; --shadow-lg: none; }
+  body { background: #fff; color: #000; }
+  .topbar, .toolbar, .alert-banner, .appfoot,
+  #modalRoot, .modal-overlay, .icon-btn, .topbar-actions { display: none !important; }
+  .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .stat-card { border: 1px solid #ccc; box-shadow: none; break-inside: avoid; }
+  .table-wrap { overflow: visible; }
+  .units-table { width: 100%; border-collapse: collapse; }
+  .units-table th, .units-table td {
+    border: 1px solid #bbb; padding: 6px 8px; font-size: 12px;
+  }
+  .units-table thead { display: table-header-group; }   /* 페이지마다 헤더 반복 */
+  .units-table tbody tr { break-inside: avoid; }
+  .expense-summary { break-inside: avoid; border: 1px solid #ccc; }
+  @page { margin: 12mm; }
+}
