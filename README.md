@@ -55,9 +55,15 @@
 
 이 저장소에는 자동 배포 워크플로(`.github/workflows/deploy.yml`)가 포함되어 있습니다.
 
+> ⚠️ **최초 1회만 수동 설정이 필요합니다.** GitHub 보안 정책상 Actions 토큰이
+> Pages 사이트를 자동 생성할 수 없어, 아래 한 번의 클릭이 필요합니다.
+
 1. GitHub 저장소 → **Settings → Pages**
-2. **Build and deployment → Source** 를 **GitHub Actions** 로 설정
-3. 배포 브랜치(`claude/sweet-meitner-8gtlz4` 또는 `main`)에 푸시하면 자동 배포
+2. **Build and deployment → Source** 를 **GitHub Actions** 로 변경 (저장)
+3. **Actions** 탭 → **Deploy to GitHub Pages** → 최근 실패한 실행에서 **Re-run jobs**
+   (또는 아무 커밋이나 다시 푸시) → 자동 배포 완료
+
+이후부터는 배포 브랜치(`claude/sweet-meitner-8gtlz4` 또는 `main`)에 푸시할 때마다 자동 배포됩니다.
 
 배포가 끝나면 다음 형태의 링크로 접속할 수 있습니다:
 
