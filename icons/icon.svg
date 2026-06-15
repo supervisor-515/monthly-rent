@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c5282"/>
+      <stop offset="1" stop-color="#1e3a5f"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <!-- 건물 본체 -->
+  <rect x="146" y="120" width="220" height="276" rx="16" fill="#ffffff"/>
+  <!-- 옥상 표시 -->
+  <rect x="176" y="96" width="160" height="28" rx="8" fill="#e2e8f0"/>
+  <!-- 창문 격자 (14개 호실 상징) -->
+  <g fill="#2c5282">
+    <rect x="170" y="150" width="40" height="40" rx="6"/>
+    <rect x="236" y="150" width="40" height="40" rx="6"/>
+    <rect x="302" y="150" width="40" height="40" rx="6"/>
+    <rect x="170" y="212" width="40" height="40" rx="6"/>
+    <rect x="302" y="212" width="40" height="40" rx="6"/>
+    <rect x="170" y="274" width="40" height="40" rx="6"/>
+    <rect x="236" y="274" width="40" height="40" rx="6"/>
+    <rect x="302" y="274" width="40" height="40" rx="6"/>
+  </g>
+  <!-- 입주(점등) 창문 -->
+  <g fill="#f6c453">
+    <rect x="236" y="212" width="40" height="40" rx="6"/>
+  </g>
+  <!-- 출입문 -->
+  <rect x="232" y="338" width="48" height="58" rx="8" fill="#1e3a5f"/>
+</svg>

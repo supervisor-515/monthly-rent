@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e3a5f" />
+  <title>수벨건물 입주자 관리</title>
+  <meta name="description" content="수벨건물 14개 호실 입주자 및 임대 수입/지출 통합 관리 프로그램" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="수벨건물" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- ===== 상단 헤더 / 상황판 ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">수</span>
+      <div>
+        <h1>수벨건물 입주자 관리</h1>
+        <p class="brand-sub">14개 호실 임대 통합 관리</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button id="btnAlerts" class="icon-btn" title="만기 알림" aria-label="만기 알림">
+        🔔<span id="alertCount" class="badge" hidden>0</span>
+      </button>
+      <button id="btnChart" class="icon-btn" title="월별 수입·지출 추이" aria-label="추이 그래프">📈</button>
+      <button id="btnExpense" class="icon-btn" title="지출 관리" aria-label="지출 관리">🧾</button>
+      <button id="btnMenu" class="icon-btn" title="설정·백업" aria-label="설정">⚙️</button>
+    </div>
+  </header>
+
+  <!-- 만기 알림 배너 -->
+  <div id="alertBanner" class="alert-banner" hidden></div>
+
+  <!-- 상황판 카드 -->
+  <section class="dashboard" aria-label="상황판">
+    <div class="stat-card">
+      <span class="stat-label">현 임대 호실</span>
+      <span class="stat-value"><b id="statOccupied">0</b> / 14</span>
+      <span class="stat-foot" id="statOccRate">가동률 0%</span>
+    </div>
+    <div class="stat-card accent-income">
+      <span class="stat-label">월 수입 총계</span>
+      <span class="stat-value" id="statIncome">0원</span>
+      <span class="stat-foot">월세 + 관리비 합산</span>
+    </div>
+    <div class="stat-card accent-expense">
+      <span class="stat-label">월 지출 총계</span>
+      <span class="stat-value" id="statExpense">0원</span>
+      <span class="stat-foot">상수도·정화조·공동전기·기타</span>
+    </div>
+    <div class="stat-card accent-net">
+      <span class="stat-label">월 순수입</span>
+      <span class="stat-value" id="statNet">0원</span>
+      <span class="stat-foot" id="statDeposit">보증금 합계 0원</span>
+    </div>
+  </section>
+
+  <!-- 검색 / 필터 -->
+  <section class="toolbar">
+    <input id="search" type="search" placeholder="🔍 호실·임차인·직업 검색" autocomplete="off" />
+    <div class="filters" id="filters">
+      <button class="chip active" data-filter="all">전체</button>
+      <button class="chip" data-filter="occupied">임대중</button>
+      <button class="chip" data-filter="vacant">공실</button>
+      <button class="chip" data-filter="expiring">만기임박</button>
+    </div>
+  </section>
+
+  <!-- 호실 목록 -->
+  <main>
+    <div class="table-wrap">
+      <table class="units-table">
+        <thead>
+          <tr>
+            <th>호실</th>
+            <th>임차인</th>
+            <th>구분</th>
+            <th class="num">최초 입주일</th>
+            <th class="num">만기일</th>
+            <th class="num">월세</th>
+            <th class="num">관리비</th>
+            <th class="num">총액</th>
+            <th class="num">거주개월</th>
+            <th>상태</th>
+          </tr>
+        </thead>
+        <tbody id="unitRows"></tbody>
+      </table>
+    </div>
+
+    <!-- 하단 지출 요약 -->
+    <section class="expense-summary" id="expenseSummary"></section>
+  </main>
+
+  <footer class="appfoot">
+    <span id="lastSaved">자동 저장됨</span>
+    <span class="dot">·</span>
+    <span>오프라인 지원 · 데이터는 이 기기에 저장됩니다</span>
+  </footer>
+
+  <!-- ===== 모달 컨테이너 ===== -->
+  <div id="modalRoot"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
