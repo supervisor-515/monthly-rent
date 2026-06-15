@@ -689,7 +689,7 @@
   function applyTheme() {
     document.documentElement.setAttribute("data-theme", state.settings.theme || "light");
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", state.settings.theme === "dark" ? "#0f1620" : "#1e3a5f");
+    if (meta) meta.setAttribute("content", state.settings.theme === "dark" ? "#20201B" : "#6B7253");
   }
 
   /* ---------- 토스트 ---------- */
