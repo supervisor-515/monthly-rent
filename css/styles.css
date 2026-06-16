@@ -134,6 +134,8 @@ body {
   display: flex; flex-direction: column; gap: 6px;
 }
 .alert-banner b { font-weight: 700; color: var(--clay); }
+/* 표시할 알림이 없으면(hidden) 막대가 보이지 않도록 — display 값이 hidden 을 덮는 문제 해결 */
+.alert-banner[hidden] { display: none; }
 
 /* ===== 상황판 KPI ===== */
 .section-title {
