@@ -59,7 +59,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; overflow-x: hidden; }
 body {
   font-family: var(--sans);
   background: var(--bg);
@@ -94,10 +94,13 @@ body {
 }
 .brand h1 {
   margin: 0; font-family: var(--serif);
-  font-size: 19px; font-weight: 600; letter-spacing: -.2px; white-space: nowrap;
+  font-size: 19px; font-weight: 600; letter-spacing: -.2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .brand-sub { margin: 0; font-size: 12px; opacity: .82; }
-.topbar-actions { display: flex; gap: 4px; }
+.topbar-actions { display: flex; gap: 4px; flex: none; }
+/* 햄버거(☰)는 기본 숨김 — 좁은 화면에서만 노출 */
+.nav-toggle { display: none; }
 .icon-btn {
   position: relative;
   width: 44px; height: 44px;
@@ -406,6 +409,11 @@ canvas#trendChart { width: 100%; height: auto; }
 }
 .menu-item:active { background: var(--surface-2); }
 .menu-item .ico { font-size: 20px; }
+.menu-item .nav-count {
+  margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px;
+  background: var(--clay); color: #fff; font-size: 12px; font-weight: 700;
+  border-radius: 10px; display: grid; place-items: center;
+}
 
 /* 토스트 */
 .toast {
@@ -424,6 +432,10 @@ canvas#trendChart { width: 100%; height: auto; }
   .stat-value { font-size: 23px; }
   .brand-sub { display: none; }
   .brand h1 { font-size: 17px; }
+
+  /* 좁은 화면(폴드5 커버 등): 액션 아이콘 4개를 햄버거(☰) 하나로 축약 */
+  #btnAlerts, #btnChart, #btnExpense, #btnMenu { display: none; }
+  .nav-toggle { display: grid; }
 
   /* 표 → 카드 */
   .table-wrap { border: none; background: transparent; box-shadow: none; overflow: visible; }

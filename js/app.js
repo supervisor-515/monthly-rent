@@ -133,9 +133,11 @@
 
   function renderAlerts() {
     const alerts = expiringAlerts();
-    const badge = $("#alertCount");
-    if (alerts.length) { badge.textContent = alerts.length; badge.hidden = false; }
-    else badge.hidden = true;
+    [$("#alertCount"), $("#navAlertCount")].forEach(badge => {
+      if (!badge) return;
+      if (alerts.length) { badge.textContent = alerts.length; badge.hidden = false; }
+      else badge.hidden = true;
+    });
 
     const banner = $("#alertBanner");
     if (!alerts.length) { banner.hidden = true; banner.innerHTML = ""; return; }
@@ -829,6 +831,29 @@
       : "만기 폰 알림을 켰습니다 (앱 실행 시 점검)");
   }
 
+  /* ---------- 통합 메뉴(햄버거) ---------- */
+  function openNav() {
+    const alerts = expiringAlerts();
+    const alertTail = alerts.length ? `<span class="nav-count">${alerts.length}</span>` : "";
+    openModal(`
+      <div class="modal-head"><div><h2>메뉴</h2></div><button class="modal-close" data-close>×</button></div>
+      <div class="modal-body">
+        <div class="menu-list">
+          <button class="menu-item" data-nav="alerts"><span class="ico">🔔</span><span>만기 알림</span>${alertTail}</button>
+          <button class="menu-item" data-nav="chart"><span class="ico">📈</span><span>월별 수입·지출 추이</span></button>
+          <button class="menu-item" data-nav="expense"><span class="ico">🧾</span><span>지출 관리</span></button>
+          <button class="menu-item" data-nav="menu"><span class="ico">⚙️</span><span>설정 · 데이터 관리</span></button>
+        </div>
+      </div>`, {
+      onMount(overlay, close) {
+        const go = fn => { close(); fn(); };
+        const map = { alerts: openAlerts, chart: openChart, expense: openExpense, menu: openMenu };
+        overlay.querySelectorAll("[data-nav]").forEach(b =>
+          b.addEventListener("click", () => go(map[b.dataset.nav])));
+      },
+    });
+  }
+
   /* ---------- 이벤트 바인딩 ---------- */
   function init() {
     applyTheme();
@@ -838,6 +863,7 @@
     $("#btnChart").addEventListener("click", openChart);
     $("#btnExpense").addEventListener("click", openExpense);
     $("#btnMenu").addEventListener("click", openMenu);
+    $("#btnNav").addEventListener("click", openNav);
 
     $("#search").addEventListener("input", e => { searchTerm = e.target.value.trim().toLowerCase(); renderRows(); });
     $("#filters").addEventListener("click", e => {
