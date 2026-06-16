@@ -16,29 +16,34 @@
     "인덕션", "가스레인지", "실링팬", "소화기",
   ];
   const EXPENSE_KEYS = ["상수도", "정화조", "공동전기", "기타"];
+  const PHOTO_SLOTS = ["방1", "방2", "주방", "화장실", "베란다"];
 
   /* ---------- 상태 ---------- */
   let state = load();
   let activeFilter = "all";
   let searchTerm = "";
+  let sortMode = "default";
 
   function freshUnit(no) {
     return {
       id: no, no,
-      tenant: "", birthYear: "", job: "",
+      tenant: "", birthYear: "", job: "", phone: "",
       moveInDate: "", expiryDate: "",
       contractType: "월세",          // 전세 / 월세
       payment: "후불",               // 선불 / 후불
       deposit: 0, rent: 0, maintenance: 0,
       options: {},
       voc: [],                       // { id, date, content, cost, resolved }
+      payments: {},                  // "YYYY-MM": true  (월세 수납 여부)
+      history: [],                   // 과거 임차인 이력 (퇴거 시 보관)
     };
   }
 
   function defaultState() {
     return {
       units: DEFAULT_UNITS.map(freshUnit),
-      expenses: { 상수도: 0, 정화조: 0, 공동전기: 0, 기타: 0 },
+      expenses: { 상수도: 0, 정화조: 0, 공동전기: 0, 기타: 0 },  // 매월 반복(기본) 지출
+      expenseLog: {},                // "YYYY-MM": {상수도,정화조,공동전기,기타} 월별 override
       optionCatalog: [...DEFAULT_OPTIONS],
       ledger: {},                    // "YYYY-MM": { income, expense }
       settings: { theme: "light", notify: false },
@@ -56,6 +61,7 @@
       return {
         ...base, ...data,
         expenses: { ...base.expenses, ...(data.expenses || {}) },
+        expenseLog: { ...(data.expenseLog || {}) },
         settings: { ...base.settings, ...(data.settings || {}) },
         optionCatalog: data.optionCatalog && data.optionCatalog.length ? data.optionCatalog : base.optionCatalog,
         units: (data.units && data.units.length ? data.units : base.units).map(u => ({ ...freshUnit(u.no), ...u })),
@@ -90,13 +96,56 @@
     residenceMonths, daysToExpiry, cumulativeIncome, unitStatus,
   } = window.SubelCalc;
 
+  /* ---------- 금액 입력(천 단위 콤마) ---------- */
+  const fmtComma = n => (Number(n) || 0).toLocaleString("ko-KR");
+  const parseMoney = v => Number(String(v == null ? "" : v).replace(/[^0-9]/g, "")) || 0;
+  /** overlay 내 [data-money] 입력칸에 입력 중 콤마 자동 포맷 적용 */
+  function wireMoneyInputs(root) {
+    root.querySelectorAll("[data-money]").forEach(el => {
+      const reformat = () => {
+        const digits = el.value.replace(/[^0-9]/g, "");
+        el.value = digits ? Number(digits).toLocaleString("ko-KR") : "";
+      };
+      reformat();
+      el.addEventListener("input", reformat);
+    });
+  }
+
+  /* ---------- 월 키 / 월별 지출 / 수납 ---------- */
+  function ymKey(d = new Date()) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); }
+  function ymLabel(key) { const [y, m] = key.split("-"); return `${y}년 ${Number(m)}월`; }
+  const currentYM = () => ymKey(new Date());
+
+  /** 해당 월 지출 항목 객체 (월별 override 있으면 그 값, 없으면 기본 반복 지출) */
+  function expenseForMonth(ym) {
+    const o = state.expenseLog && state.expenseLog[ym];
+    const base = state.expenses || {};
+    const out = {};
+    EXPENSE_KEYS.forEach(k => { out[k] = Number((o && o[k] != null) ? o[k] : base[k]) || 0; });
+    return out;
+  }
+  function expenseTotalForMonth(ym) {
+    const o = expenseForMonth(ym);
+    return EXPENSE_KEYS.reduce((s, k) => s + (Number(o[k]) || 0), 0);
+  }
+
+  function isPaid(u, ym = currentYM()) { return !!(u.payments && u.payments[ym]); }
+  function setPaid(u, ym, val) {
+    if (!u.payments) u.payments = {};
+    if (val) u.payments[ym] = true; else delete u.payments[ym];
+  }
+  /** 이번 달 미납(임대중인데 수납 안 된) 호실 목록 */
+  function unpaidUnits(ym = currentYM()) {
+    return state.units.filter(u => isOccupied(u) && !isPaid(u, ym));
+  }
+
   /* ---------- 집계 ---------- */
   function totals() {
     let income = 0, deposit = 0, occupied = 0;
     state.units.forEach(u => {
       if (isOccupied(u)) { occupied++; income += unitTotal(u); deposit += Number(u.deposit) || 0; }
     });
-    const expense = EXPENSE_KEYS.reduce((s, k) => s + (Number(state.expenses[k]) || 0), 0);
+    const expense = expenseTotalForMonth(currentYM());
     return { income, expense, deposit, occupied, net: income - expense };
   }
 
@@ -117,7 +166,20 @@
     renderAlerts();
     renderRows();
     renderExpenseSummary();
+    updateBadges();
     applyTheme();
+  }
+
+  function setBadge(el, n) {
+    if (!el) return;
+    if (n > 0) { el.textContent = n; el.hidden = false; } else el.hidden = true;
+  }
+  function updateBadges() {
+    const alerts = expiringAlerts().length;
+    const unpaid = unpaidUnits().length;
+    setBadge($("#alertCount"), alerts);
+    setBadge($("#payCount"), unpaid);
+    setBadge($("#navAlertCount"), alerts + unpaid);   // 햄버거: 할 일(만기+미납) 합산 표시
   }
 
   function renderDashboard() {
@@ -133,12 +195,6 @@
 
   function renderAlerts() {
     const alerts = expiringAlerts();
-    [$("#alertCount"), $("#navAlertCount")].forEach(badge => {
-      if (!badge) return;
-      if (alerts.length) { badge.textContent = alerts.length; badge.hidden = false; }
-      else badge.hidden = true;
-    });
-
     const banner = $("#alertBanner");
     if (!alerts.length) { banner.hidden = true; banner.innerHTML = ""; return; }
     banner.hidden = false;
@@ -151,56 +207,85 @@
     const occ = isOccupied(u);
     if (activeFilter === "occupied" && !occ) return false;
     if (activeFilter === "vacant" && occ) return false;
+    if (activeFilter === "unpaid" && !(occ && !isPaid(u))) return false;
     if (activeFilter === "expiring") {
       const d = daysToExpiry(u.expiryDate);
       if (!(occ && d !== null && d >= 0 && d <= 60)) return false;
     }
     if (searchTerm) {
-      const hay = `${u.no} ${u.tenant} ${u.job}`.toLowerCase();
+      const hay = `${u.no} ${u.tenant} ${u.job} ${u.phone || ""}`.toLowerCase();
       if (!hay.includes(searchTerm)) return false;
     }
     return true;
   }
 
+  function sortRows(rows) {
+    const arr = rows.slice();
+    if (sortMode === "expiry") {
+      arr.sort((a, b) => {
+        const da = daysToExpiry(a.expiryDate), db = daysToExpiry(b.expiryDate);
+        if (da === null && db === null) return 0;
+        if (da === null) return 1;        // 만기일 없음은 뒤로
+        if (db === null) return -1;
+        return da - db;
+      });
+    } else if (sortMode === "rentDesc") {
+      arr.sort((a, b) => unitTotal(b) - unitTotal(a));
+    } else if (sortMode === "rentAsc") {
+      arr.sort((a, b) => unitTotal(a) - unitTotal(b));
+    }
+    return arr;
+  }
+
   function renderRows() {
     const tbody = $("#unitRows");
-    const rows = state.units.filter(matchesFilter);
+    const rows = sortRows(state.units.filter(matchesFilter));
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="10" class="voc-empty">조건에 맞는 호실이 없습니다.</td></tr>`;
       return;
     }
+    const dash = '<span class="muted">—</span>';
     tbody.innerHTML = rows.map(u => {
       const st = unitStatus(u);
       const occ = isOccupied(u);
       const typeTag = u.contractType === "전세"
         ? `<span class="tag tag-jeonse">전세</span>`
         : `<span class="tag tag-wolse">월세</span>`;
-      return `<tr data-id="${esc(u.id)}">
+      const payTag = occ
+        ? (isPaid(u) ? `<span class="paytag paid">수납</span>` : `<span class="paytag unpaid">미납</span>`)
+        : "";
+      return `<tr data-id="${esc(u.id)}" tabindex="0" role="button" aria-label="${esc(u.no)}호 상세 열기">
         <td><span class="unit-no">${esc(u.no)}</span></td>
-        <td>${occ ? esc(u.tenant) : '<span class="tenant-empty">공실</span>'}</td>
+        <td>${occ ? esc(u.tenant) + " " + payTag : '<span class="tenant-empty">공실</span>'}</td>
         <td>${typeTag}</td>
         <td class="num">${esc(u.moveInDate || "—")}</td>
         <td class="num">${esc(u.expiryDate || "—")}</td>
-        <td class="num">${u.contractType === "전세" ? "—" : won(u.rent)}</td>
-        <td class="num">${won(u.maintenance)}</td>
-        <td class="num"><b>${won(unitTotal(u))}</b></td>
-        <td class="num">${occ ? residenceMonths(u.moveInDate) + "개월" : "—"}</td>
+        <td class="num">${(!occ || u.contractType === "전세") ? dash : won(u.rent)}</td>
+        <td class="num">${occ ? won(u.maintenance) : dash}</td>
+        <td class="num">${occ ? `<b>${won(unitTotal(u))}</b>` : dash}</td>
+        <td class="num">${occ ? residenceMonths(u.moveInDate) + "개월" : dash}</td>
         <td><span class="status ${st.cls}">${st.label}</span></td>
       </tr>`;
     }).join("");
-    tbody.querySelectorAll("tr[data-id]").forEach(tr =>
-      tr.addEventListener("click", () => openUnitDetail(tr.dataset.id)));
+    tbody.querySelectorAll("tr[data-id]").forEach(tr => {
+      const open = () => openUnitDetail(tr.dataset.id);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+      });
+    });
   }
 
   function renderExpenseSummary() {
-    const total = EXPENSE_KEYS.reduce((s, k) => s + (Number(state.expenses[k]) || 0), 0);
+    const exp = expenseForMonth(currentYM());
+    const total = EXPENSE_KEYS.reduce((s, k) => s + (Number(exp[k]) || 0), 0);
     const vocTotal = state.units.reduce((s, u) =>
       s + u.voc.reduce((a, v) => a + (Number(v.cost) || 0), 0), 0);
     const el = $("#expenseSummary");
     el.innerHTML = `
-      <h3>월 지출 총액 <span class="total">${won(total)}</span></h3>
+      <h3>${ymLabel(currentYM())} 지출 총액 <span class="total">${won(total)}</span></h3>
       ${EXPENSE_KEYS.map(k => `
-        <div class="exp-item"><div class="k">${k}</div><div class="v">${won(state.expenses[k])}</div></div>
+        <div class="exp-item"><div class="k">${k}</div><div class="v">${won(exp[k])}</div></div>
       `).join("")}
       <div class="exp-item"><div class="k">호실 VOC 처리비 누계</div><div class="v">${won(vocTotal)}</div></div>`;
   }
@@ -208,16 +293,35 @@
   /* ---------- 모달 기반 ---------- */
   function openModal(html, opts = {}) {
     const root = $("#modalRoot");
+    const prevFocus = document.activeElement;
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
+    const modal = overlay.querySelector(".modal");
     overlay.addEventListener("mousedown", e => { if (e.target === overlay) close(); });
-    function close() { overlay.remove(); if (opts.onClose) opts.onClose(); document.removeEventListener("keydown", onKey); }
-    function onKey(e) { if (e.key === "Escape") close(); }
+    const focusables = () => modal.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    function close() {
+      overlay.remove();
+      if (opts.onClose) opts.onClose();
+      document.removeEventListener("keydown", onKey);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();   // 포커스 복귀
+    }
+    function onKey(e) {
+      if (e.key === "Escape") { close(); return; }
+      if (e.key === "Tab") {                                  // 포커스 트랩
+        const f = focusables(); if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    }
     document.addEventListener("keydown", onKey);
     overlay.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", close));
     root.appendChild(overlay);
     if (opts.onMount) opts.onMount(overlay, close);
+    // 모달 내 첫 입력/버튼에 포커스
+    const f = focusables(); if (f.length) f[0].focus();
     return { overlay, close };
   }
 
@@ -235,16 +339,20 @@
       </div>
       <div class="tabs">
         <button class="tab active" data-tab="info">계약·임차인</button>
+        <button class="tab" data-tab="photos">사진</button>
         <button class="tab" data-tab="options">세대 옵션</button>
         <button class="tab" data-tab="voc">VOC 민원</button>
+        <button class="tab" data-tab="history">이력</button>
       </div>
       <div class="modal-body">
         <div class="tab-panel active" data-panel="info">${infoPanel(u)}</div>
+        <div class="tab-panel" data-panel="photos">${photosPanel(u)}</div>
         <div class="tab-panel" data-panel="options">${optionsPanel(u)}</div>
         <div class="tab-panel" data-panel="voc">${vocPanel(u)}</div>
+        <div class="tab-panel" data-panel="history">${historyPanel(u)}</div>
       </div>
       <div class="modal-foot">
-        <button class="btn btn-danger btn-sm" data-clear>입주 정보 비우기</button>
+        <button class="btn btn-danger btn-sm" data-clear>퇴거 처리</button>
         <button class="btn" data-close>닫기</button>
         <button class="btn btn-primary" data-save>저장</button>
       </div>`;
@@ -259,19 +367,20 @@
           overlay.querySelector(`[data-panel="${t.dataset.tab}"]`).classList.add("active");
         }));
 
-        // 옵션 토글 시각효과
+        wireMoneyInputs(overlay);
+        wireInfo(overlay, u);
+        wirePhotos(overlay, u);
         wireOptions(overlay, u);
         const rerenderVoc = () => {
           overlay.querySelector('[data-panel="voc"]').innerHTML = vocPanel(u);
           wireVoc(overlay, u, rerenderVoc);
         };
         wireVoc(overlay, u, rerenderVoc);
-
-        // 계약유형 변경 시 월세 입력 토글
-        const typeSel = overlay.querySelector('[name="contractType"]');
-        const rentField = overlay.querySelector('[data-rent-field]');
-        const syncType = () => { rentField.style.opacity = typeSel.value === "전세" ? .45 : 1; };
-        typeSel.addEventListener("change", syncType); syncType();
+        const rerenderHist = () => {
+          overlay.querySelector('[data-panel="history"]').innerHTML = historyPanel(u);
+          wireHistory(overlay, u, rerenderHist);
+        };
+        wireHistory(overlay, u, rerenderHist);
 
         overlay.querySelector("[data-save]").addEventListener("click", () => {
           const err = validateUnitForm(overlay);
@@ -280,23 +389,59 @@
           save(); render(); close(); toast(u.no + "호 저장됨");
         });
         overlay.querySelector("[data-clear]").addEventListener("click", () => {
-          if (!confirm(u.no + "호의 입주자·계약 정보를 모두 비우시겠습니까? (옵션·VOC 포함)")) return;
-          Object.assign(u, freshUnit(u.no));
-          save(); render(); close(); toast(u.no + "호 공실 처리됨");
+          if (!isOccupied(u)) { toast("공실 호실입니다."); return; }
+          if (!confirm(u.no + "호를 퇴거 처리할까요? 현재 임차인 정보가 ‘이력’으로 보관되고 호실은 공실이 됩니다. (사진은 유지)")) return;
+          archiveTenant(u);
+          save(); render(); close(); toast(u.no + "호 퇴거 처리됨 (이력 보관)");
         });
       },
     });
   }
 
+  /** 현재 임차인을 이력으로 보관하고 호실을 공실로 초기화 (사진은 유지) */
+  function archiveTenant(u) {
+    u.history = u.history || [];
+    u.history.unshift({
+      id: uid(),
+      tenant: u.tenant, phone: u.phone, job: u.job, birthYear: u.birthYear,
+      moveInDate: u.moveInDate, expiryDate: u.expiryDate, vacatedAt: new Date().toISOString().slice(0, 10),
+      contractType: u.contractType, deposit: u.deposit, rent: u.rent, maintenance: u.maintenance,
+      voc: u.voc || [],
+      depositReturned: false, settleMemo: "",
+    });
+    const fresh = freshUnit(u.no);
+    // 옵션·이력은 호실 자산이므로 유지
+    fresh.options = u.options;
+    fresh.history = u.history;
+    Object.assign(u, fresh);
+  }
+
   function infoPanel(u) {
     const cum = cumulativeIncome(u);
+    const occ = isOccupied(u);
+    const ym = currentYM();
+    const paid = isPaid(u, ym);
+    const phoneDigits = String(u.phone || "").replace(/[^0-9+]/g, "");
+    const contact = occ && phoneDigits ? `
+      <div class="contact-row">
+        <a class="btn btn-sm" href="tel:${esc(phoneDigits)}">📞 전화</a>
+        <a class="btn btn-sm" href="sms:${esc(phoneDigits)}">💬 문자</a>
+      </div>` : "";
+    const payRow = occ ? `
+      <div class="pay-toggle ${paid ? "on" : ""}" data-toggle-paid>
+        <span>${ymLabel(ym)} 월세 수납</span>
+        <span class="pay-state">${paid ? "✅ 완료" : "⏳ 미납"}</span>
+      </div>` : "";
     return `
       <div class="mini-stats">
         <div class="mini"><div class="k">총액(월)</div><div class="v">${won(unitTotal(u))}</div></div>
         <div class="mini"><div class="k">거주개월</div><div class="v">${residenceMonths(u.moveInDate)}개월</div></div>
         <div class="mini"><div class="k">누적 수령(추정)</div><div class="v">${wonShort(cum)}</div></div>
       </div>
+      ${contact}
+      ${payRow}
       <div class="field"><label>임차인 이름</label><input name="tenant" value="${esc(u.tenant)}" placeholder="홍길동" /></div>
+      <div class="field"><label>전화번호</label><input name="phone" type="tel" inputmode="tel" value="${esc(u.phone)}" placeholder="010-1234-5678" /></div>
       <div class="grid2">
         <div class="field"><label>출생년</label><input name="birthYear" type="number" inputmode="numeric" value="${esc(u.birthYear)}" placeholder="1980" /></div>
         <div class="field"><label>직업</label><input name="job" value="${esc(u.job)}" placeholder="회사원" /></div>
@@ -320,11 +465,29 @@
         </div>
       </div>
       <div class="grid2" style="margin-top:14px">
-        <div class="field"><label>보증금</label><input name="deposit" type="number" inputmode="numeric" value="${esc(u.deposit)}" /></div>
-        <div class="field" data-rent-field><label>월세</label><input name="rent" type="number" inputmode="numeric" value="${esc(u.rent)}" /></div>
+        <div class="field"><label>보증금</label><input name="deposit" type="text" inputmode="numeric" data-money value="${fmtComma(u.deposit)}" /></div>
+        <div class="field" data-rent-field><label>월세</label><input name="rent" type="text" inputmode="numeric" data-money value="${fmtComma(u.rent)}" /></div>
       </div>
-      <div class="field" style="margin-top:14px"><label>관리비</label><input name="maintenance" type="number" inputmode="numeric" value="${esc(u.maintenance)}" /></div>
+      <div class="field" style="margin-top:14px"><label>관리비</label><input name="maintenance" type="text" inputmode="numeric" data-money value="${fmtComma(u.maintenance)}" /></div>
       <p class="hint">총액(월) = 월세 + 관리비 · 전세는 관리비만 합산됩니다.</p>`;
+  }
+
+  /** info 패널 상호작용 (수납 토글, 계약유형에 따른 월세칸 흐리기) */
+  function wireInfo(overlay, u) {
+    const typeSel = overlay.querySelector('[name="contractType"]');
+    const rentField = overlay.querySelector('[data-rent-field]');
+    const syncType = () => { rentField.style.opacity = typeSel.value === "전세" ? .45 : 1; };
+    typeSel.addEventListener("change", syncType); syncType();
+
+    const payEl = overlay.querySelector("[data-toggle-paid]");
+    if (payEl) payEl.addEventListener("click", () => {
+      const ym = currentYM();
+      setPaid(u, ym, !isPaid(u, ym));
+      const on = isPaid(u, ym);
+      payEl.classList.toggle("on", on);
+      payEl.querySelector(".pay-state").textContent = on ? "✅ 완료" : "⏳ 미납";
+      save(); renderRows(); updateBadges();
+    });
   }
 
   /** 저장 전 입력값 검증. 문제가 있으면 사용자용 메시지를, 없으면 null 을 반환 */
@@ -333,13 +496,6 @@
     const moveIn = g("moveInDate").value;
     const expiry = g("expiryDate").value;
     if (moveIn && expiry && moveIn > expiry) return "만기일이 최초 입주일보다 빠를 수 없습니다.";
-    const numFields = { deposit: "보증금", rent: "월세", maintenance: "관리비" };
-    for (const [name, label] of Object.entries(numFields)) {
-      const raw = g(name).value.trim();
-      if (raw === "") continue;
-      const v = Number(raw);
-      if (!isFinite(v) || v < 0) return `${label} 금액을 0 이상으로 입력하세요.`;
-    }
     const by = g("birthYear").value.trim();
     if (by !== "") {
       const y = Number(by);
@@ -353,15 +509,138 @@
   function readUnitForm(overlay, u) {
     const g = n => overlay.querySelector(`[name="${n}"]`);
     u.tenant = g("tenant").value.trim();
+    u.phone = g("phone").value.trim();
     u.birthYear = g("birthYear").value.trim();
     u.job = g("job").value.trim();
     u.moveInDate = g("moveInDate").value;
     u.expiryDate = g("expiryDate").value;
     u.contractType = g("contractType").value;
     u.payment = g("payment").value;
-    u.deposit = Number(g("deposit").value) || 0;
-    u.rent = Number(g("rent").value) || 0;
-    u.maintenance = Number(g("maintenance").value) || 0;
+    u.deposit = parseMoney(g("deposit").value);
+    u.rent = parseMoney(g("rent").value);
+    u.maintenance = parseMoney(g("maintenance").value);
+  }
+
+  /* ---------- 호실 사진 (IndexedDB 저장) ---------- */
+  const photoKey = (u, slot) => `photo:${u.id}:${slot}`;
+
+  function photosPanel(u) {
+    return `
+      <p class="hint" style="margin-bottom:12px">호실 사진을 등록하세요. 카메라 촬영 또는 갤러리에서 선택할 수 있습니다.</p>
+      <div class="photo-grid">
+        ${PHOTO_SLOTS.map(slot => `
+          <div class="photo-cell" data-slot="${esc(slot)}">
+            <div class="photo-thumb" data-photo-thumb>
+              <span class="photo-ph">＋<br>${esc(slot)}</span>
+            </div>
+            <div class="photo-cap">${esc(slot)}</div>
+            <input type="file" accept="image/*" capture="environment" data-photo-input hidden />
+            <button class="btn btn-sm photo-del" data-photo-del hidden>삭제</button>
+          </div>`).join("")}
+      </div>`;
+  }
+
+  function wirePhotos(overlay, u) {
+    const store = window.SubelStore;
+    overlay.querySelectorAll(".photo-cell").forEach(cell => {
+      const slot = cell.dataset.slot;
+      const thumb = cell.querySelector("[data-photo-thumb]");
+      const input = cell.querySelector("[data-photo-input]");
+      const delBtn = cell.querySelector("[data-photo-del]");
+      const key = photoKey(u, slot);
+
+      const showImg = url => {
+        if (url) {
+          thumb.innerHTML = `<img src="${url}" alt="${esc(slot)} 사진" />`;
+          thumb.classList.add("has");
+          delBtn.hidden = false;
+        } else {
+          thumb.innerHTML = `<span class="photo-ph">＋<br>${esc(slot)}</span>`;
+          thumb.classList.remove("has");
+          delBtn.hidden = true;
+        }
+      };
+
+      // 기존 사진 불러오기
+      if (store) store.idbGet(key).then(showImg).catch(() => {});
+
+      thumb.addEventListener("click", () => input.click());
+      input.addEventListener("change", async () => {
+        const file = input.files && input.files[0];
+        input.value = "";
+        if (!file || !store) return;
+        try {
+          const dataUrl = await compressImage(file);
+          await store.idbSet(key, dataUrl);
+          showImg(dataUrl);
+          toast(slot + " 사진 저장됨");
+        } catch (e) { toast("사진을 불러오지 못했습니다"); }
+      });
+      delBtn.addEventListener("click", async () => {
+        if (!store) return;
+        if (!confirm(slot + " 사진을 삭제할까요?")) return;
+        await store.idbDel(key);
+        showImg(null);
+        toast(slot + " 사진 삭제됨");
+      });
+    });
+  }
+
+  /** 이미지 파일을 최대 1280px·JPEG로 압축해 dataURL 반환 */
+  function compressImage(file, maxDim = 1280, quality = 0.7) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        let { width: w, height: h } = img;
+        if (w > maxDim || h > maxDim) {
+          if (w >= h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image load")); };
+      img.src = url;
+    });
+  }
+
+  /* ---------- 임차인 이력 ---------- */
+  function historyPanel(u) {
+    const hist = u.history || [];
+    if (!hist.length) return `<div class="voc-empty">보관된 임차인 이력이 없습니다.<br><span class="hint">‘퇴거 처리’ 시 이전 임차인이 여기에 보관됩니다.</span></div>`;
+    return `<div class="voc-list">${hist.map(h => `
+      <div class="hist-card" data-hist="${h.id}">
+        <div class="voc-top">
+          <span><b>${esc(h.tenant || "이름없음")}</b>${h.phone ? ` · ${esc(h.phone)}` : ""}</span>
+          <span class="muted">${esc(h.moveInDate || "?")} ~ ${esc(h.vacatedAt || "?")}</span>
+        </div>
+        <div class="hist-meta muted">${esc(h.contractType || "월세")} · 보증금 ${won(h.deposit)} · 월세 ${won(h.rent)}</div>
+        <div class="field" style="margin-top:8px"><label>보증금 정산 메모</label>
+          <textarea data-hist-memo placeholder="예: 도배 비용 5만원 차감 후 반환">${esc(h.settleMemo || "")}</textarea></div>
+        <label class="hist-return"><input type="checkbox" data-hist-returned ${h.depositReturned ? "checked" : ""}/> 보증금 반환 완료</label>
+        <div style="text-align:right;margin-top:6px"><button class="btn btn-sm btn-danger" data-hist-del>이력 삭제</button></div>
+      </div>`).join("")}</div>`;
+  }
+
+  function wireHistory(overlay, u, rerender) {
+    const panel = overlay.querySelector('[data-panel="history"]');
+    panel.querySelectorAll("[data-hist]").forEach(card => {
+      const h = (u.history || []).find(x => x.id === card.dataset.hist);
+      if (!h) return;
+      const memo = card.querySelector("[data-hist-memo]");
+      const ret = card.querySelector("[data-hist-returned]");
+      memo.addEventListener("change", () => { h.settleMemo = memo.value.trim(); save(); });
+      ret.addEventListener("change", () => { h.depositReturned = ret.checked; save(); });
+      card.querySelector("[data-hist-del]").addEventListener("click", () => {
+        if (!confirm("이 임차인 이력을 삭제할까요?")) return;
+        u.history = u.history.filter(x => x.id !== h.id);
+        save(); rerender();
+      });
+    });
   }
 
   function optionsPanel(u) {
@@ -446,19 +725,29 @@
     }));
   }
 
-  /* ---------- 지출 모달 ---------- */
+  /* ---------- 지출 모달 (월별 기록) ---------- */
   function openExpense() {
+    const months = last12Months().map(d => ymKey(d)).reverse();   // 최근 월이 위로
+    const cur = currentYM();
+    const fields = ym => {
+      const exp = expenseForMonth(ym);
+      return EXPENSE_KEYS.map(k => `
+        <div class="field"><label>${k}</label>
+          <input type="text" inputmode="numeric" data-money data-exp="${k}" value="${fmtComma(exp[k])}" /></div>`).join("");
+    };
     const html = `
       <div class="modal-head">
-        <div><h2>지출 관리</h2><div class="sub">월별 공통 지출 항목</div></div>
+        <div><h2>지출 관리</h2><div class="sub">월별 공통 지출 기록</div></div>
         <button class="modal-close" data-close>×</button>
       </div>
       <div class="modal-body">
-        ${EXPENSE_KEYS.map(k => `
-          <div class="field"><label>${k}</label>
-            <input type="number" inputmode="numeric" data-exp="${k}" value="${esc(state.expenses[k])}" /></div>
-        `).join("")}
-        <p class="hint">여기 입력한 값은 하단 ‘월 지출 총액’과 상황판·추이 그래프에 반영됩니다.</p>
+        <div class="field"><label>월 선택</label>
+          <select data-exp-month>
+            ${months.map(ym => `<option value="${ym}" ${ym === cur ? "selected" : ""}>${ymLabel(ym)}${ym === cur ? " (이번 달)" : ""}</option>`).join("")}
+          </select>
+        </div>
+        <div data-exp-fields>${fields(cur)}</div>
+        <p class="hint">월마다 따로 기록됩니다. 비워두면 ‘이번 달’ 값이 기본으로 적용되고, 입력한 값은 상황판·추이 그래프에 반영됩니다.</p>
       </div>
       <div class="modal-foot">
         <button class="btn" data-close>닫기</button>
@@ -466,12 +755,62 @@
       </div>`;
     openModal(html, {
       onMount(overlay, close) {
+        const monthSel = overlay.querySelector("[data-exp-month]");
+        const fieldsBox = overlay.querySelector("[data-exp-fields]");
+        const reload = () => { fieldsBox.innerHTML = fields(monthSel.value); wireMoneyInputs(fieldsBox); };
+        wireMoneyInputs(fieldsBox);
+        monthSel.addEventListener("change", reload);
         overlay.querySelector("[data-save]").addEventListener("click", () => {
-          EXPENSE_KEYS.forEach(k => {
-            state.expenses[k] = Number(overlay.querySelector(`[data-exp="${k}"]`).value) || 0;
-          });
-          save(); render(); close(); toast("지출 저장됨");
+          const ym = monthSel.value;
+          const vals = {};
+          EXPENSE_KEYS.forEach(k => { vals[k] = parseMoney(overlay.querySelector(`[data-exp="${k}"]`).value); });
+          state.expenseLog[ym] = vals;
+          if (ym === cur) state.expenses = { ...vals };   // 이번 달 = 반복 기본값으로도 반영
+          save(); render(); close(); toast(ymLabel(ym) + " 지출 저장됨");
         });
+      },
+    });
+  }
+
+  /* ---------- 이번 달 수납 모달 ---------- */
+  function openPayments() {
+    const ym = currentYM();
+    const tpl = () => {
+      const occ = state.units.filter(isOccupied);
+      const paidCnt = occ.filter(u => isPaid(u, ym)).length;
+      const due = occ.reduce((s, u) => s + unitTotal(u), 0);
+      const got = occ.filter(u => isPaid(u, ym)).reduce((s, u) => s + unitTotal(u), 0);
+      const rows = occ.length ? occ.map(u => `
+        <label class="pay-row ${isPaid(u, ym) ? "on" : ""}" data-pay="${esc(u.id)}">
+          <input type="checkbox" ${isPaid(u, ym) ? "checked" : ""}/>
+          <span class="pay-no">${esc(u.no)}호</span>
+          <span class="pay-name">${esc(u.tenant)}</span>
+          <span class="pay-amt">${won(unitTotal(u))}</span>
+        </label>`).join("") : `<div class="voc-empty">임대 중인 호실이 없습니다.</div>`;
+      return `
+        <div class="pay-summary">
+          <div><b>${paidCnt}/${occ.length}</b><span>수납</span></div>
+          <div><b>${won(got)}</b><span>수납액</span></div>
+          <div><b class="${due - got ? "warn" : ""}">${won(due - got)}</b><span>미수금</span></div>
+        </div>
+        <div class="pay-list">${rows}</div>`;
+    };
+    openModal(`
+      <div class="modal-head"><div><h2>이번 달 수납</h2><div class="sub">${ymLabel(ym)}</div></div><button class="modal-close" data-close>×</button></div>
+      <div class="modal-body" data-pay-body>${tpl()}</div>
+      <div class="modal-foot"><button class="btn btn-primary" data-close>완료</button></div>`, {
+      onMount(overlay) {
+        const body = overlay.querySelector("[data-pay-body]");
+        const wire = () => body.querySelectorAll("[data-pay]").forEach(row => {
+          row.querySelector("input").addEventListener("change", e => {
+            const u = state.units.find(x => x.id === row.dataset.pay);
+            if (!u) return;
+            setPaid(u, ym, e.target.checked);
+            save(); renderRows(); updateBadges();
+            body.innerHTML = tpl(); wire();
+          });
+        });
+        wire();
       },
     });
   }
@@ -501,12 +840,12 @@
   function ledgerFor(key) {
     const t = totals();
     const rec = state.ledger[key];
-    // 현재 수입/지출 자동 적용은 '해당 월'(현재 달)에만 적용한다.
-    // 과거/미래 달은 저장된 실적이 없으면 0으로 둔다.
+    // 수입: 저장된 실적 우선, 없으면 현재 달만 현재 수입 자동 적용(과거는 0)
+    // 지출: 저장된 실적 우선, 없으면 그 달의 월별 지출 기록(없으면 반복 기본값) 자동 적용
     const isCurrent = key === monthKey(new Date());
     return {
       income: rec && rec.income != null ? rec.income : (isCurrent ? t.income : 0),
-      expense: rec && rec.expense != null ? rec.expense : (isCurrent ? t.expense : 0),
+      expense: rec && rec.expense != null ? rec.expense : expenseTotalForMonth(key),
     };
   }
 
@@ -650,7 +989,8 @@
         act("print").addEventListener("click", () => { close(); window.print(); });
         act("install").addEventListener("click", () => { promptInstall(); });
         act("reset").addEventListener("click", () => {
-          if (!confirm("모든 호실·지출·실적 데이터를 삭제하고 기본값으로 되돌립니다. 계속할까요?")) return;
+          if (!confirm("모든 호실·지출·실적·사진 데이터를 삭제하고 기본값으로 되돌립니다. 계속할까요?")) return;
+          deleteAllPhotos();
           state = defaultState(); save(); render(); close(); toast("초기화되었습니다");
         });
       },
@@ -703,7 +1043,8 @@
             const u = state.units.find(x => x.id === b.dataset.delUnit);
             if (!u) return;
             if (state.units.length <= 1) { toast("최소 1개 호실은 있어야 합니다."); return; }
-            if (!confirm(u.no + "호를 삭제하시겠습니까? 계약·옵션·VOC 기록이 모두 사라집니다.")) return;
+            if (!confirm(u.no + "호를 삭제하시겠습니까? 계약·옵션·VOC·사진 기록이 모두 사라집니다.")) return;
+            deleteUnitPhotos(u.id);
             state.units = state.units.filter(x => x.id !== u.id);
             save(); render(); rerender();
             toast(u.no + "호 삭제됨");
@@ -714,13 +1055,25 @@
     });
   }
 
-  function exportData() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  async function exportData() {
+    const data = { ...state };
+    // 사진(IndexedDB)도 백업에 포함해 완전한 복원이 되도록 한다
+    try {
+      const store = window.SubelStore;
+      if (store && store.idbKeys) {
+        const keys = await store.idbKeys();
+        const photoKeys = keys.filter(k => typeof k === "string" && k.startsWith("photo:"));
+        const photos = {};
+        for (const k of photoKeys) photos[k] = await store.idbGet(k);
+        if (photoKeys.length) data._photos = photos;
+      }
+    } catch (e) { /* 사진 없이라도 백업 진행 */ }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `수벨건물_백업_${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
-    toast("백업 파일을 내려받았습니다");
+    toast("백업 파일을 내려받았습니다 (사진 포함)");
   }
   function importData(e, close) {
     const file = e.target.files[0]; if (!file) return;
@@ -736,12 +1089,34 @@
         }
         if (data.expenses != null && typeof data.expenses !== "object") throw new Error("지출 형식 오류");
         if (data.ledger != null && typeof data.ledger !== "object") throw new Error("실적 형식 오류");
+        // 사진은 IndexedDB로 따로 복원 (localStorage엔 넣지 않음)
+        const photos = data._photos; delete data._photos;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        if (photos && window.SubelStore) {
+          Object.entries(photos).forEach(([k, v]) => {
+            if (typeof k === "string" && k.startsWith("photo:") && typeof v === "string") {
+              window.SubelStore.idbSet(k, v).catch(() => {});
+            }
+          });
+        }
         state = load(); save(); render();   // load() 가 누락 필드를 기본값으로 보정
         if (close) close(); toast("데이터를 복원했습니다");
       } catch (err) { toast("올바른 백업 파일이 아닙니다"); }
     };
     reader.readAsText(file);
+  }
+
+  /* ---------- 사진 정리(IndexedDB) ---------- */
+  async function deleteUnitPhotos(unitId) {
+    const store = window.SubelStore; if (!store) return;
+    try { for (const slot of PHOTO_SLOTS) await store.idbDel(`photo:${unitId}:${slot}`); } catch (e) {}
+  }
+  async function deleteAllPhotos() {
+    const store = window.SubelStore; if (!store || !store.idbKeys) return;
+    try {
+      const keys = await store.idbKeys();
+      for (const k of keys) if (typeof k === "string" && k.startsWith("photo:")) await store.idbDel(k);
+    } catch (e) {}
   }
 
   /* ---------- 테마 ---------- */
@@ -835,10 +1210,13 @@
   function openNav() {
     const alerts = expiringAlerts();
     const alertTail = alerts.length ? `<span class="nav-count">${alerts.length}</span>` : "";
+    const unpaid = unpaidUnits().length;
+    const payTail = unpaid ? `<span class="nav-count">${unpaid}</span>` : "";
     openModal(`
       <div class="modal-head"><div><h2>메뉴</h2></div><button class="modal-close" data-close>×</button></div>
       <div class="modal-body">
         <div class="menu-list">
+          <button class="menu-item" data-nav="pay"><span class="ico">💰</span><span>이번 달 수납</span>${payTail}</button>
           <button class="menu-item" data-nav="alerts"><span class="ico">🔔</span><span>만기 알림</span>${alertTail}</button>
           <button class="menu-item" data-nav="chart"><span class="ico">📈</span><span>월별 수입·지출 추이</span></button>
           <button class="menu-item" data-nav="expense"><span class="ico">🧾</span><span>지출 관리</span></button>
@@ -847,7 +1225,7 @@
       </div>`, {
       onMount(overlay, close) {
         const go = fn => { close(); fn(); };
-        const map = { alerts: openAlerts, chart: openChart, expense: openExpense, menu: openMenu };
+        const map = { pay: openPayments, alerts: openAlerts, chart: openChart, expense: openExpense, menu: openMenu };
         overlay.querySelectorAll("[data-nav]").forEach(b =>
           b.addEventListener("click", () => go(map[b.dataset.nav])));
       },
@@ -860,12 +1238,14 @@
     render();
 
     $("#btnAlerts").addEventListener("click", openAlerts);
+    $("#btnPay").addEventListener("click", openPayments);
     $("#btnChart").addEventListener("click", openChart);
     $("#btnExpense").addEventListener("click", openExpense);
     $("#btnMenu").addEventListener("click", openMenu);
     $("#btnNav").addEventListener("click", openNav);
 
     $("#search").addEventListener("input", e => { searchTerm = e.target.value.trim().toLowerCase(); renderRows(); });
+    $("#sortSel").addEventListener("change", e => { sortMode = e.target.value; renderRows(); });
     $("#filters").addEventListener("click", e => {
       const chip = e.target.closest(".chip"); if (!chip) return;
       activeFilter = chip.dataset.filter;
