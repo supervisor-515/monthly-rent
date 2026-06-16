@@ -41,7 +41,7 @@
       expenses: { 상수도: 0, 정화조: 0, 공동전기: 0, 기타: 0 },
       optionCatalog: [...DEFAULT_OPTIONS],
       ledger: {},                    // "YYYY-MM": { income, expense }
-      settings: { theme: "light" },
+      settings: { theme: "light", notify: false },
       updatedAt: Date.now(),
     };
   }
@@ -75,60 +75,20 @@
     } catch (e) {
       toast("저장 공간이 부족합니다.");
     }
+    pushAlertSnapshot();   // 서비스워커 백그라운드 점검용 미러링
   }
 
   /* ---------- 유틸 ---------- */
   const $ = (s, r = document) => r.querySelector(s);
-  const won = n => (Number(n) || 0).toLocaleString("ko-KR") + "원";
-  const wonShort = n => {
-    n = Number(n) || 0;
-    if (n >= 100000000) return (n / 100000000).toFixed(n % 100000000 ? 1 : 0) + "억원";
-    if (n >= 10000) return Math.round(n / 10000).toLocaleString("ko-KR") + "만원";
-    return won(n);
-  };
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-  function isOccupied(u) { return !!(u.tenant && u.tenant.trim()); }
-
-  /** 총액 = 월세 + 관리비 (전세는 월세 0) */
-  function unitTotal(u) {
-    if (u.contractType === "전세") return Number(u.maintenance) || 0;
-    return (Number(u.rent) || 0) + (Number(u.maintenance) || 0);
-  }
-
-  /** 거주개월: 최초 입주일 기준 1달 후 도래일을 1개월로 산출 */
-  function residenceMonths(moveIn, ref = new Date()) {
-    if (!moveIn) return 0;
-    const s = new Date(moveIn);
-    if (isNaN(s)) return 0;
-    let months = (ref.getFullYear() - s.getFullYear()) * 12 + (ref.getMonth() - s.getMonth());
-    if (ref.getDate() < s.getDate()) months -= 1;   // 도래일 미도달 시 미산입
-    return Math.max(0, months);
-  }
-
-  /** 만기까지 남은 일수 (없으면 null) */
-  function daysToExpiry(expiry, ref = new Date()) {
-    if (!expiry) return null;
-    const e = new Date(expiry); if (isNaN(e)) return null;
-    const r = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
-    return Math.round((e - r) / 86400000);
-  }
-
-  /** 누적 수령액(추정) = 거주개월 × 총액 + VOC 비용은 제외 */
-  function cumulativeIncome(u) {
-    return residenceMonths(u.moveInDate) * unitTotal(u);
-  }
-
-  function unitStatus(u) {
-    if (!isOccupied(u)) return { cls: "status-vacant", label: "공실" };
-    const d = daysToExpiry(u.expiryDate);
-    if (d === null) return { cls: "status-ok", label: "임대중" };
-    if (d < 0) return { cls: "status-danger", label: "만기경과" };
-    if (d <= 60) return { cls: "status-warn", label: `만기 ${d}일전` };
-    return { cls: "status-ok", label: "임대중" };
-  }
+  // 순수 계산/포매팅 함수는 js/calc.js 로 분리되어 단위 테스트 대상입니다.
+  const {
+    won, wonShort, isOccupied, unitTotal,
+    residenceMonths, daysToExpiry, cumulativeIncome, unitStatus,
+  } = window.SubelCalc;
 
   /* ---------- 집계 ---------- */
   function totals() {
@@ -312,6 +272,8 @@
         typeSel.addEventListener("change", syncType); syncType();
 
         overlay.querySelector("[data-save]").addEventListener("click", () => {
+          const err = validateUnitForm(overlay);
+          if (err) { toast(err); return; }
           readUnitForm(overlay, u);
           save(); render(); close(); toast(u.no + "호 저장됨");
         });
@@ -361,6 +323,29 @@
       </div>
       <div class="field" style="margin-top:14px"><label>관리비</label><input name="maintenance" type="number" inputmode="numeric" value="${esc(u.maintenance)}" /></div>
       <p class="hint">총액(월) = 월세 + 관리비 · 전세는 관리비만 합산됩니다.</p>`;
+  }
+
+  /** 저장 전 입력값 검증. 문제가 있으면 사용자용 메시지를, 없으면 null 을 반환 */
+  function validateUnitForm(overlay) {
+    const g = n => overlay.querySelector(`[name="${n}"]`);
+    const moveIn = g("moveInDate").value;
+    const expiry = g("expiryDate").value;
+    if (moveIn && expiry && moveIn > expiry) return "만기일이 최초 입주일보다 빠를 수 없습니다.";
+    const numFields = { deposit: "보증금", rent: "월세", maintenance: "관리비" };
+    for (const [name, label] of Object.entries(numFields)) {
+      const raw = g(name).value.trim();
+      if (raw === "") continue;
+      const v = Number(raw);
+      if (!isFinite(v) || v < 0) return `${label} 금액을 0 이상으로 입력하세요.`;
+    }
+    const by = g("birthYear").value.trim();
+    if (by !== "") {
+      const y = Number(by);
+      if (!Number.isInteger(y) || y < 1900 || y > new Date().getFullYear()) {
+        return "출생년을 올바르게 입력하세요.";
+      }
+    }
+    return null;
   }
 
   function readUnitForm(overlay, u) {
@@ -514,9 +499,12 @@
   function ledgerFor(key) {
     const t = totals();
     const rec = state.ledger[key];
+    // 현재 수입/지출 자동 적용은 '해당 월'(현재 달)에만 적용한다.
+    // 과거/미래 달은 저장된 실적이 없으면 0으로 둔다.
+    const isCurrent = key === monthKey(new Date());
     return {
-      income: rec && rec.income != null ? rec.income : t.income,
-      expense: rec && rec.expense != null ? rec.expense : t.expense,
+      income: rec && rec.income != null ? rec.income : (isCurrent ? t.income : 0),
+      expense: rec && rec.expense != null ? rec.expense : (isCurrent ? t.expense : 0),
     };
   }
 
@@ -532,7 +520,7 @@
           <span><i style="background:var(--net)"></i>순수입</span>
         </div>
         <canvas id="trendChart" width="600" height="300"></canvas>
-        <p class="hint" style="margin-top:10px">값을 직접 입력하면 해당 월 실적으로 저장됩니다. 비워두면 현재 수입/지출이 자동 적용됩니다.</p>
+        <p class="hint" style="margin-top:10px">값을 직접 입력하면 해당 월 실적으로 저장됩니다. 현재 달은 비워두면 현재 수입/지출이 자동 적용되며, 다른 달은 입력한 달에만 반영됩니다.</p>
         <table class="ledger-table">
           <thead><tr><th>월</th><th>수입</th><th>지출</th><th>순수입</th></tr></thead>
           <tbody>
@@ -630,11 +618,14 @@
   /* ---------- 설정 / 백업 ---------- */
   function openMenu() {
     const dark = state.settings.theme === "dark";
+    const notifyOn = !!state.settings.notify && (!("Notification" in window) || Notification.permission === "granted");
     openModal(`
       <div class="modal-head"><div><h2>설정 · 데이터 관리</h2></div><button class="modal-close" data-close>×</button></div>
       <div class="modal-body">
         <div class="menu-list">
           <button class="menu-item" data-act="theme"><span class="ico">${dark ? "☀️" : "🌙"}</span><span>${dark ? "라이트 모드로 전환" : "다크 모드로 전환"}</span></button>
+          <button class="menu-item" data-act="notify"><span class="ico">🔔</span><span>만기 폰 알림 ${notifyOn ? "끄기" : "켜기"}</span></button>
+          <button class="menu-item" data-act="units"><span class="ico">🏗️</span><span>호실 추가 · 삭제</span></button>
           <button class="menu-item" data-act="export"><span class="ico">💾</span><span>데이터 백업 (JSON 내보내기)</span></button>
           <button class="menu-item" data-act="import"><span class="ico">📂</span><span>데이터 복원 (JSON 가져오기)</span></button>
           <button class="menu-item" data-act="print"><span class="ico">🖨️</span><span>현황 인쇄 / PDF 저장</span></button>
@@ -649,6 +640,8 @@
         act("theme").addEventListener("click", () => {
           state.settings.theme = dark ? "light" : "dark"; save(); applyTheme(); close(); openMenu();
         });
+        act("notify").addEventListener("click", async () => { close(); await toggleNotifications(); });
+        act("units").addEventListener("click", () => { close(); openUnitManager(); });
         act("export").addEventListener("click", exportData);
         act("import").addEventListener("click", () => overlay.querySelector("#importFile").click());
         overlay.querySelector("#importFile").addEventListener("change", e => importData(e, close));
@@ -658,6 +651,63 @@
           if (!confirm("모든 호실·지출·실적 데이터를 삭제하고 기본값으로 되돌립니다. 계속할까요?")) return;
           state = defaultState(); save(); render(); close(); toast("초기화되었습니다");
         });
+      },
+    });
+  }
+
+  /* ---------- 호실 추가 / 삭제 ---------- */
+  function openUnitManager() {
+    const tpl = () => `
+      <div class="unit-manage-list">
+        ${state.units.map(u => `
+          <div class="unit-manage-row" data-row="${esc(u.id)}">
+            <span class="unit-manage-no">${esc(u.no)}호</span>
+            <span class="muted">${isOccupied(u) ? esc(u.tenant) + " 임대중" : "공실"}</span>
+            <button class="btn btn-sm btn-danger" data-del-unit="${esc(u.id)}">삭제</button>
+          </div>`).join("")}
+      </div>
+      <div class="opt-add" style="margin-top:12px">
+        <input type="text" inputmode="numeric" data-new-unit placeholder="추가할 호실번호 (예: 404)" />
+        <button class="btn btn-sm btn-primary" data-add-unit>추가</button>
+      </div>
+      <p class="hint" style="margin-top:10px">호실을 삭제하면 해당 호실의 계약·옵션·VOC 기록이 함께 사라집니다.</p>`;
+
+    openModal(`
+      <div class="modal-head"><div><h2>호실 추가 · 삭제</h2><div class="sub">현재 ${state.units.length}개 호실</div></div><button class="modal-close" data-close>×</button></div>
+      <div class="modal-body" data-unit-mgr>${tpl()}</div>
+      <div class="modal-foot"><button class="btn btn-primary" data-close>완료</button></div>`, {
+      onMount(overlay) {
+        const body = overlay.querySelector("[data-unit-mgr]");
+        const sub = overlay.querySelector(".modal-head .sub");
+        const rerender = () => {
+          body.innerHTML = tpl();
+          if (sub) sub.textContent = `현재 ${state.units.length}개 호실`;
+          wire();
+        };
+        const wire = () => {
+          const addBtn = body.querySelector("[data-add-unit]");
+          const addInput = body.querySelector("[data-new-unit]");
+          const doAdd = () => {
+            const no = addInput.value.trim();
+            if (!no) return;
+            if (state.units.some(u => String(u.no) === no)) { toast("이미 존재하는 호실입니다."); return; }
+            state.units.push(freshUnit(no));
+            save(); render(); rerender();
+            toast(no + "호 추가됨");
+          };
+          if (addBtn) addBtn.addEventListener("click", doAdd);
+          if (addInput) addInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); doAdd(); } });
+          body.querySelectorAll("[data-del-unit]").forEach(b => b.addEventListener("click", () => {
+            const u = state.units.find(x => x.id === b.dataset.delUnit);
+            if (!u) return;
+            if (state.units.length <= 1) { toast("최소 1개 호실은 있어야 합니다."); return; }
+            if (!confirm(u.no + "호를 삭제하시겠습니까? 계약·옵션·VOC 기록이 모두 사라집니다.")) return;
+            state.units = state.units.filter(x => x.id !== u.id);
+            save(); render(); rerender();
+            toast(u.no + "호 삭제됨");
+          }));
+        };
+        wire();
       },
     });
   }
@@ -676,9 +726,16 @@
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result);
-        if (!data.units) throw new Error("형식 오류");
+        if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("형식 오류");
+        if (!Array.isArray(data.units) || !data.units.length) throw new Error("호실 데이터 없음");
+        // 각 호실에 식별용 호실번호가 있어야 함
+        if (!data.units.every(u => u && (typeof u.no === "string" || typeof u.no === "number") && String(u.no).trim())) {
+          throw new Error("호실번호 누락");
+        }
+        if (data.expenses != null && typeof data.expenses !== "object") throw new Error("지출 형식 오류");
+        if (data.ledger != null && typeof data.ledger !== "object") throw new Error("실적 형식 오류");
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        state = load(); save(); render();
+        state = load(); save(); render();   // load() 가 누락 필드를 기본값으로 보정
         if (close) close(); toast("데이터를 복원했습니다");
       } catch (err) { toast("올바른 백업 파일이 아닙니다"); }
     };
@@ -715,6 +772,63 @@
     }
   }
 
+  /* ---------- 만기 알림 (실제 폰 알림) ---------- */
+  const notifySupported = () => "Notification" in window && "serviceWorker" in navigator;
+
+  /** 현재 호실 데이터를 IndexedDB 로 미러링 (SW 백그라운드 점검용) */
+  function pushAlertSnapshot() {
+    if (!window.SubelStore || !window.SubelStore.idbSet) return;
+    const units = state.units
+      .filter(isOccupied)
+      .map(u => ({ no: u.no, tenant: u.tenant, expiryDate: u.expiryDate }));
+    window.SubelStore.idbSet("units", units).catch(() => {});
+  }
+
+  /** 백그라운드 주기 점검 등록 (Chrome/Android · best-effort) */
+  async function registerPeriodicSync() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (!("periodicSync" in reg)) return false;
+      const status = await navigator.permissions.query({ name: "periodic-background-sync" });
+      if (status.state !== "granted") return false;
+      await reg.periodicSync.register("rent-expiry-check", { minInterval: 24 * 60 * 60 * 1000 });
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /** 앱이 열려있을 때 즉시 점검 → 임박 호실 있으면 시스템 알림 */
+  async function foregroundExpiryCheck() {
+    if (!state.settings.notify || !notifySupported() || Notification.permission !== "granted") return;
+    try {
+      pushAlertSnapshot();
+      const reg = await navigator.serviceWorker.ready;
+      // SW 가 IndexedDB 를 읽어 하루 1회 알림을 처리한다.
+      if (reg.active) reg.active.postMessage({ type: "check-expiry" });
+    } catch (e) {}
+  }
+
+  /** 설정에서 알림 켜기/끄기 */
+  async function toggleNotifications() {
+    if (!notifySupported()) { toast("이 브라우저는 알림을 지원하지 않습니다"); return; }
+    if (state.settings.notify) {
+      state.settings.notify = false; save();
+      toast("만기 폰 알림을 껐습니다");
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      toast("알림 권한이 거부되어 있습니다. 브라우저 사이트 설정에서 허용해 주세요");
+      return;
+    }
+    state.settings.notify = true; save();
+    const bg = await registerPeriodicSync();
+    await foregroundExpiryCheck();
+    toast(bg
+      ? "만기 폰 알림을 켰습니다 (백그라운드 점검 포함)"
+      : "만기 폰 알림을 켰습니다 (앱 실행 시 점검)");
+  }
+
   /* ---------- 이벤트 바인딩 ---------- */
   function init() {
     applyTheme();
@@ -736,7 +850,9 @@
     // 서비스워커 등록 (오프라인/PWA)
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js").catch(() => {});
+        navigator.serviceWorker.register("sw.js")
+          .then(() => { pushAlertSnapshot(); foregroundExpiryCheck(); })
+          .catch(() => {});
       });
     }
   }
