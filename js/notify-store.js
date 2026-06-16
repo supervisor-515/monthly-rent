@@ -35,6 +35,23 @@
       tx.onerror = () => rej(tx.error);
     });
   }
+  async function idbDel(key) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+  async function idbKeys() {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const t = db.transaction(STORE, "readonly").objectStore(STORE).getAllKeys();
+      t.onsuccess = () => res(t.result || []);
+      t.onerror = () => rej(t.error);
+    });
+  }
 
   /** 저장된 호실 스냅샷에서 만기 임박 목록 계산 (점검 시점 기준 재계산) */
   function buildAlerts(units, ref) {
@@ -61,5 +78,5 @@
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
 
-  root.SubelStore = { idbGet, idbSet, buildAlerts, formatAlert, todayKey, ALERT_DAYS };
+  root.SubelStore = { idbGet, idbSet, idbDel, idbKeys, buildAlerts, formatAlert, todayKey, ALERT_DAYS };
 })(typeof self !== "undefined" ? self : this);

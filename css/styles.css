@@ -32,9 +32,10 @@
   --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(60,50,30,.04), 0 6px 18px rgba(80,68,40,.06);
   --shadow-lg: 0 16px 48px rgba(50,40,20,.22);
-  --serif: "Fraunces", "Pretendard Variable", Pretendard, serif;
   --sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
           "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  /* 폰트 한 가지(Pretendard)로 통일 — 기존 var(--serif) 사용처도 모두 Pretendard로 */
+  --serif: var(--sans);
 
   --safe-l: env(safe-area-inset-left);
   --safe-r: env(safe-area-inset-right);
@@ -435,8 +436,8 @@ canvas#trendChart { width: 100%; height: auto; }
   .brand-sub { display: none; }
   .brand h1 { font-size: 17px; }
 
-  /* 좁은 화면(폴드5 커버 등): 액션 아이콘 4개를 숨기고 햄버거(☰) 하나만 노출 */
-  #btnAlerts, #btnChart, #btnExpense, #btnMenu { display: none; }
+  /* 좁은 화면(폴드5 커버 등): 액션 아이콘들을 숨기고 햄버거(☰) 하나만 노출 */
+  #btnAlerts, #btnPay, #btnChart, #btnExpense, #btnMenu { display: none; }
   .icon-btn.nav-toggle { display: grid; }
 
   /* 표 → 카드 */
@@ -547,3 +548,86 @@ canvas#trendChart { width: 100%; height: auto; }
   .expense-summary { break-inside: avoid; border: 1px solid #ccc; }
   @page { margin: 12mm; }
 }
+
+/* ============================================================
+   신규 기능 스타일 — 수납 / 사진 / 이력 / 정렬 / 접근성
+   ============================================================ */
+
+/* 툴바: 필터 + 정렬 한 줄 */
+.toolbar-row { display: flex; align-items: center; gap: 10px; }
+.toolbar-row .filters { flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sort-sel {
+  flex: none; min-height: 38px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--text); font-size: 13px; font-family: inherit;
+}
+
+/* 목록 행: 키보드 포커스 */
+.units-table tbody tr:focus-visible {
+  outline: 2px solid var(--olive); outline-offset: -2px; border-radius: 8px;
+}
+
+/* 수납 태그 (목록) */
+.paytag {
+  display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; vertical-align: middle;
+}
+.paytag.paid { background: var(--olive-soft); color: var(--olive-strong); }
+.paytag.unpaid { background: var(--clay-soft); color: var(--clay); }
+
+/* 상세: 연락 버튼 / 수납 토글 */
+.contact-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.contact-row .btn { flex: 1; text-align: center; text-decoration: none; }
+.pay-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; margin-bottom: 16px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--clay-soft); font-weight: 600;
+}
+.pay-toggle.on { background: var(--olive-soft); }
+.pay-toggle .pay-state { font-weight: 700; }
+
+/* 사진 그리드 */
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px; }
+.photo-cell { display: flex; flex-direction: column; gap: 6px; }
+.photo-thumb {
+  position: relative; aspect-ratio: 1 / 1; width: 100%;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2); display: grid; place-items: center;
+  overflow: hidden; cursor: pointer;
+}
+.photo-thumb.has { border-style: solid; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-ph { color: var(--text-soft); font-size: 13px; text-align: center; line-height: 1.5; }
+.photo-cap { font-size: 12px; font-weight: 600; color: var(--text-soft); text-align: center; }
+.photo-del { width: 100%; }
+
+/* 임차인 이력 */
+.hist-card { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px; background: var(--surface-2); }
+.hist-meta { font-size: 13px; margin-top: 4px; }
+.hist-return { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; cursor: pointer; }
+.hist-return input { width: 18px; height: 18px; accent-color: var(--olive); }
+
+/* 이번 달 수납 모달 */
+.pay-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.pay-summary > div {
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: 12px; text-align: center;
+}
+.pay-summary b { display: block; font-size: 18px; font-weight: 700; }
+.pay-summary b.warn { color: var(--clay); }
+.pay-summary span { font-size: 12px; color: var(--text-soft); }
+.pay-list { display: flex; flex-direction: column; gap: 8px; }
+.pay-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); cursor: pointer;
+}
+.pay-row.on { background: var(--olive-soft); border-color: var(--olive); }
+.pay-row input { width: 20px; height: 20px; accent-color: var(--olive); flex: none; }
+.pay-row .pay-no { font-weight: 700; min-width: 50px; }
+.pay-row .pay-name { flex: 1; }
+.pay-row .pay-amt { font-weight: 700; }
+
+/* 탭이 늘어나도 가로 스크롤 */
+.tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tabs .tab { white-space: nowrap; flex: none; }
