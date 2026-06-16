@@ -534,7 +534,7 @@
               <span class="photo-ph">＋<br>${esc(slot)}</span>
             </div>
             <div class="photo-cap">${esc(slot)}</div>
-            <input type="file" accept="image/*" capture="environment" data-photo-input hidden />
+            <input type="file" accept="image/*" data-photo-input hidden />
             <button class="btn btn-sm photo-del" data-photo-del hidden>삭제</button>
           </div>`).join("")}
       </div>`;
