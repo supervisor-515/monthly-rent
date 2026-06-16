@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      # GitHub Pages 환경이 이 브랜치로 배포되도록 제한되어 있어 실제 배포 트리거로 유지
+      - claude/sweet-meitner-8gtlz4
   workflow_dispatch:
 
 permissions:
