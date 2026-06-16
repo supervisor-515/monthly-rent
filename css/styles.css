@@ -133,9 +133,18 @@ body {
 .alert-banner b { font-weight: 700; color: var(--clay); }
 
 /* ===== 상황판 KPI ===== */
+.section-title {
+  margin: 0;
+  padding: 16px 16px 0;
+  padding-left: calc(16px + var(--safe-l));
+  padding-right: calc(16px + var(--safe-r));
+  font-family: var(--serif);
+  font-size: 18px; font-weight: 600; letter-spacing: -.2px;
+  color: var(--text);
+}
 .dashboard {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-  padding: 16px;
+  padding: 10px 16px 16px;
   padding-left: calc(16px + var(--safe-l));
   padding-right: calc(16px + var(--safe-r));
 }
