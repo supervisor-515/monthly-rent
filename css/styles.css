@@ -99,8 +99,9 @@ body {
 }
 .brand-sub { margin: 0; font-size: 12px; opacity: .82; }
 .topbar-actions { display: flex; gap: 4px; flex: none; }
-/* 햄버거(☰)는 기본 숨김 — 좁은 화면에서만 노출 */
-.nav-toggle { display: none; }
+/* 햄버거(☰)는 기본 숨김 — 좁은 화면에서만 노출
+   (.icon-btn 의 display:grid 보다 우선하도록 클래스 2개로 지정) */
+.icon-btn.nav-toggle { display: none; }
 .icon-btn {
   position: relative;
   width: 44px; height: 44px;
@@ -433,9 +434,9 @@ canvas#trendChart { width: 100%; height: auto; }
   .brand-sub { display: none; }
   .brand h1 { font-size: 17px; }
 
-  /* 좁은 화면(폴드5 커버 등): 액션 아이콘 4개를 햄버거(☰) 하나로 축약 */
+  /* 좁은 화면(폴드5 커버 등): 액션 아이콘 4개를 숨기고 햄버거(☰) 하나만 노출 */
   #btnAlerts, #btnChart, #btnExpense, #btnMenu { display: none; }
-  .nav-toggle { display: grid; }
+  .icon-btn.nav-toggle { display: grid; }
 
   /* 표 → 카드 */
   .table-wrap { border: none; background: transparent; box-shadow: none; overflow: visible; }
