@@ -21,10 +21,13 @@ jobs:
           node-version: "20"
 
       - name: Run unit tests (의존성 없음)
-        run: node tests/calc.test.js
+        run: |
+          node tests/calc.test.js
+          node tests/notify.test.js
 
       - name: Syntax check (모든 JS 파일)
         run: |
           node --check js/calc.js
+          node --check js/notify-store.js
           node --check js/app.js
           node --check sw.js
