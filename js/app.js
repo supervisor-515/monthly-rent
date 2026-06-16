@@ -320,8 +320,9 @@
     overlay.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", close));
     root.appendChild(overlay);
     if (opts.onMount) opts.onMount(overlay, close);
-    // 모달 내 첫 입력/버튼에 포커스
-    const f = focusables(); if (f.length) f[0].focus();
+    // 모달 컨테이너에 포커스 (입력칸 자동 포커스 시 모바일 키보드가 떠 레이아웃이 가려지는 문제 방지)
+    modal.setAttribute("tabindex", "-1");
+    modal.focus({ preventScroll: true });
     return { overlay, close };
   }
 
@@ -340,8 +341,8 @@
       <div class="tabs">
         <button class="tab active" data-tab="info">계약·임차인</button>
         <button class="tab" data-tab="photos">사진</button>
-        <button class="tab" data-tab="options">세대 옵션</button>
-        <button class="tab" data-tab="voc">VOC 민원</button>
+        <button class="tab" data-tab="options">옵션</button>
+        <button class="tab" data-tab="voc">VOC</button>
         <button class="tab" data-tab="history">이력</button>
       </div>
       <div class="modal-body">
