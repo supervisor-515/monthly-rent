@@ -89,9 +89,8 @@ body {
   display: grid; place-items: center;
   background: rgba(255,255,255,.16);
   border-radius: 11px;
-  font-family: var(--serif);
-  font-weight: 700; font-size: 21px;
 }
+.brand-mark .brand-ic { width: 27px; height: 27px; display: block; }
 .brand h1 {
   margin: 0; font-family: var(--serif);
   font-size: 19px; font-weight: 600; letter-spacing: -.2px;
