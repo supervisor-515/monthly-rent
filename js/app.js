@@ -126,7 +126,20 @@
   }
   function expenseTotalForMonth(ym) {
     const o = expenseForMonth(ym);
-    return EXPENSE_KEYS.reduce((s, k) => s + (Number(o[k]) || 0), 0);
+    const util = EXPENSE_KEYS.reduce((s, k) => s + (Number(o[k]) || 0), 0);
+    return util + vocCostForMonth(ym);   // 공통지출 + 그 달의 VOC 처리비
+  }
+  /** 해당 월(처리일자 기준) 호실 VOC 처리비 합계 */
+  function vocCostForMonth(ym) {
+    let s = 0;
+    state.units.forEach(u => (u.voc || []).forEach(v => {
+      if (v.date && String(v.date).slice(0, 7) === ym) s += Number(v.cost) || 0;
+    }));
+    return s;
+  }
+  /** 전체 기간 VOC 처리비 누계 */
+  function vocCostAll() {
+    return state.units.reduce((s, u) => s + (u.voc || []).reduce((a, v) => a + (Number(v.cost) || 0), 0), 0);
   }
 
   function isPaid(u, ym = currentYM()) { return !!(u.payments && u.payments[ym]); }
@@ -277,17 +290,19 @@
   }
 
   function renderExpenseSummary() {
-    const exp = expenseForMonth(currentYM());
-    const total = EXPENSE_KEYS.reduce((s, k) => s + (Number(exp[k]) || 0), 0);
-    const vocTotal = state.units.reduce((s, u) =>
-      s + u.voc.reduce((a, v) => a + (Number(v.cost) || 0), 0), 0);
+    const cur = currentYM();
+    const exp = expenseForMonth(cur);
+    const util = EXPENSE_KEYS.reduce((s, k) => s + (Number(exp[k]) || 0), 0);
+    const vocMonth = vocCostForMonth(cur);
+    const total = util + vocMonth;
     const el = $("#expenseSummary");
     el.innerHTML = `
-      <h3>${ymLabel(currentYM())} 지출 총액 <span class="total">${won(total)}</span></h3>
+      <h3>${ymLabel(cur)} 지출 총액 <span class="total">${won(total)}</span></h3>
       ${EXPENSE_KEYS.map(k => `
         <div class="exp-item"><div class="k">${k}</div><div class="v">${won(exp[k])}</div></div>
       `).join("")}
-      <div class="exp-item"><div class="k">호실 VOC 처리비 누계</div><div class="v">${won(vocTotal)}</div></div>`;
+      <div class="exp-item"><div class="k">호실 VOC 처리비 (이번 달)</div><div class="v">${won(vocMonth)}</div></div>
+      <p class="hint" style="margin-top:8px">VOC 처리비는 ‘처리일자’가 속한 달의 지출에 합산됩니다 · 전체 누계 ${won(vocCostAll())}</p>`;
   }
 
   /* ---------- 모달 기반 ---------- */
@@ -718,11 +733,11 @@
         cost: Number(panel.querySelector("[data-voc-cost]").value) || 0,
         resolved: false,
       });
-      save(); renderExpenseSummary(); rerender();
+      save(); renderDashboard(); renderExpenseSummary(); rerender();
     });
     panel.querySelectorAll("[data-del-voc]").forEach(b => b.addEventListener("click", () => {
       u.voc = u.voc.filter(v => v.id !== b.dataset.delVoc);
-      save(); renderExpenseSummary(); rerender();
+      save(); renderDashboard(); renderExpenseSummary(); rerender();
     }));
   }
 
